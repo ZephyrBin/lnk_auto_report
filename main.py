@@ -1,6 +1,7 @@
 import argparse
 from constant import VT_API
 from analyze_lnk import LNKAnalyzer
+#pip install pywin32 requests jinja2 matplotlib numpy needed
 
 
 def main():

@@ -10,6 +10,7 @@ import io
 import base64
 from jinja2 import Template
 from generate_report import generate_report
+import re
 
 class LNKAnalyzer:
     def __init__(self, lnk_path, vt_api_key=None):
@@ -85,104 +86,222 @@ class LNKAnalyzer:
         }
         return {name: (value, desc) for name, (value, desc) in flag_descriptions.items()}
 
+    def parse_string_data(self, data, offset, is_unicode):
+        try:
+            string_size = struct.unpack('<H', data[offset:offset+2])[0]
+            offset += 2
+        
+            if is_unicode:
+                string_data = data[offset:offset+string_size*2].decode('utf-16le', errors='ignore')
+                return string_data, 2 + (string_size * 2)
+            else:
+                string_data = data[offset:offset+string_size].decode('ascii', errors='ignore')
+                return string_data, 2 + string_size
+        except Exception as e:
+            return f"Error parsing string: {str(e)}", 2
+
+    def analyze_string_data(self, data, offset, flags):
+        string_data = {}
+        current_offset = offset
+        is_unicode = flags['IsUnicode'][0]
+
+        string_order = [
+            ('HasName', 'NAME'),
+            ('HasRelativePath', 'RELATIVE_PATH'),
+            ('HasWorkingDir', 'WORKING_DIR'),
+            ('HasArguments', 'COMMAND_LINE_ARGUMENTS'),
+            ('HasIconLocation', 'ICON_LOCATION')
+        ]
+
+        for flag_name, string_type in string_order:
+            if flags[flag_name][0]:
+                string_size = struct.unpack('<H', data[current_offset:current_offset+2])[0]
+                size_hex = data[current_offset:current_offset+2].hex()
+                
+                string_size = struct.unpack('<H', data[current_offset:current_offset+2])[0]
+                size_hex = data[current_offset:current_offset+2].hex()
+
+                if is_unicode:
+                    string_data_size = string_size * 2
+                    string_value = data[current_offset+2:current_offset+2+string_data_size].decode('utf-16le', errors='ignore')
+                else:
+                    string_data_size = string_size
+                    string_value = data[current_offset+2:current_offset+2+string_data_size].decode('ascii', errors='ignore')
+
+                string_data[string_type] = {
+                    'value': string_value,
+                    'offset': hex(current_offset),
+                    'size': string_data_size,
+                    'size_hex': f"Size: {size_hex} ({string_size})",
+                    'raw_hex': data[current_offset+2:current_offset+2+string_data_size].hex(),
+                    'total_size': 2 + string_data_size
+                }
+
+                current_offset += 2 + string_data_size
+
+                # 의심스러운 문자열 검사
+                if string_type == 'COMMAND_LINE_ARGUMENTS':
+                    self.check_suspicious_commands(string_value)
+
+        return string_data, current_offset
+
+    def check_suspicious_commands(self, command_string):
+        if not command_string:
+            return
+
+        suspicious_patterns = [
+            (r'powershell.*-enc.*', 'Encoded PowerShell command'),
+            (r'cmd.*/c.*', 'Command prompt execution'),
+            (r'rundll32.*,', 'RunDLL32 usage'),
+            (r'%.*%.*%', 'Multiple environment variables'),
+            (r'\\\\.*\\.*\$', 'Hidden share access'),
+            (r'certutil.*-decode', 'Certificate utility decode'),
+            (r'mshta.*http', 'MSHTA with URL'),
+        ]
+
+        for pattern, description in suspicious_patterns:
+            if re.search(pattern, command_string, re.IGNORECASE):
+                self.suspicious.append(f"Suspicious command pattern: {description}")
+                self.risk_score += 3
+
+    def parse_extra_block_data(self, signature, data):
+        try:
+            if signature == 0xA0000001:  # ConsoleDataBlock
+                return {
+                    'type': 'ConsoleDataBlock',
+                    'fill_attributes': struct.unpack('<H', data[0:2])[0],
+                    'popup_fill_attributes': struct.unpack('<H', data[2:4])[0],
+                    'screen_buffer_size_x': struct.unpack('<H', data[4:6])[0],
+                    'screen_buffer_size_y': struct.unpack('<H', data[6:8])[0],
+                    'window_size_x': struct.unpack('<H', data[8:10])[0],
+                    'window_size_y': struct.unpack('<H', data[10:12])[0]
+                }
+            
+            elif signature == 0xA0000002:  # ConsoleFEDataBlock
+                return {
+                    'type': 'ConsoleFEDataBlock',
+                    'code_page': struct.unpack('<I', data[0:4])[0]
+                }
+                
+            elif signature == 0xA0000003:  # DarwinDataBlock
+                app_name = data[0:260].split(b'\x00')[0].decode('ascii', errors='ignore')
+                return {
+                    'type': 'DarwinDataBlock',
+                    'darwin_data_ansi': app_name
+                }
+                
+            elif signature == 0xA0000004:  # EnvironmentVariableDataBlock
+                target_ansi = data[0:260].split(b'\x00')[0].decode('ascii', errors='ignore')
+                target_unicode = data[260:520].split(b'\x00\x00')[0].decode('utf-16le', errors='ignore')
+                return {
+                    'type': 'EnvironmentVariableDataBlock',
+                    'target_ansi': target_ansi,
+                    'target_unicode': target_unicode
+                }
+                
+            elif signature == 0xA0000005:  # IconEnvironmentDataBlock
+                target_ansi = data[0:260].split(b'\x00')[0].decode('ascii', errors='ignore')
+                target_unicode = data[260:520].split(b'\x00\x00')[0].decode('utf-16le', errors='ignore')
+                return {
+                    'type': 'IconEnvironmentDataBlock',
+                    'target_ansi': target_ansi,
+                    'target_unicode': target_unicode
+                }
+                
+            elif signature == 0xA0000006:  # KnownFolderDataBlock
+                return {
+                    'type': 'KnownFolderDataBlock',
+                    'known_folder_id': data[0:16].hex(),
+                    'offset': struct.unpack('<I', data[16:20])[0]
+                }
+                
+            elif signature == 0xA0000008:  # ShimDataBlock
+                return {
+                    'type': 'ShimDataBlock',
+                    'layer_name': data.split(b'\x00\x00')[0].decode('utf-16le', errors='ignore')
+                }
+                
+            elif signature == 0xA0000009:  # SpecialFolderDataBlock
+                return {
+                    'type': 'SpecialFolderDataBlock',
+                    'special_folder_id': struct.unpack('<I', data[0:4])[0],
+                    'offset': struct.unpack('<I', data[4:8])[0]
+                }
+                
+            elif signature == 0xA000000A:  # TrackerDataBlock
+                return {
+                    'type': 'TrackerDataBlock',
+                    'length': struct.unpack('<I', data[0:4])[0],
+                    'version': struct.unpack('<I', data[4:8])[0],
+                    'machine_id': data[8:16].hex(),
+                    'droid_volume_id': data[16:32].hex(),
+                    'droid_file_id': data[32:48].hex(),
+                    'birth_droid_volume_id': data[48:64].hex(),
+                    'birth_droid_file_id': data[64:80].hex(),
+                }
+                
+            elif signature == 0xA000000B:  # VistaAndAboveIDListDataBlock
+                return {
+                    'type': 'VistaAndAboveIDListDataBlock',
+                    'data': data.hex()
+                }
+                
+            else:
+                return {
+                    'type': 'Unknown',
+                    'note': f'Unknown signature: {hex(signature)}'
+                }
+                
+        except Exception as e:
+            return {
+                'type': 'Error',
+                'error': f'Failed to parse block data: {str(e)}'
+            }
+
     def analyze_extra_blocks(self, data, offset):
         blocks = []
         current_offset = offset
-        block_count = 0
-        env_block_data = None
-        icon_env_block_data = None
 
         while current_offset < len(data):
             if current_offset + 8 > len(data):
                 break
 
-            block_size = struct.unpack('<I', data[current_offset:current_offset+4])[0]
+            block_size_bytes = data[current_offset:current_offset+4]
+            block_size = struct.unpack('<I', block_size_bytes)[0]
             if block_size == 0:
                 break
 
-            signature = struct.unpack('<I', data[current_offset+4:current_offset+8])[0]
+            signature_bytes = data[current_offset+4:current_offset+8]
+            signature = struct.unpack('<I', signature_bytes)[0]
             
             block_info = {
                 'offset': hex(current_offset),
                 'size': block_size,
-                'signature': hex(signature),
+                'size_hex': f"Size: {block_size_bytes.hex()} ({block_size})",
+                'signature': hex(signature), 
+                'signature_hex': signature_bytes.hex(),
                 'name': self.KNOWN_BLOCKS.get(signature, ('Unknown', None))[0],
                 'expected_size': self.KNOWN_BLOCKS.get(signature, ('Unknown', None))[1],
-                'data': self.parse_environment_block(data, current_offset, block_size)
+                'data_hex': data[current_offset+8:current_offset+block_size].hex(),
+                'parsed_data': self.parse_extra_block_data(signature, data[current_offset+8:current_offset+block_size])
             }
-            
-            # Analyze EnvironmentVariableDataBlock
-            if signature == 0xA0000004:  # EnvironmentVariableDataBlock
-                block_info['data'] = self.parse_environment_block(data, current_offset, block_size)
-                env_block_data = block_info['data']
-            
-            # Analyze IconEnvironmentDataBlock
-            elif signature == 0xA0000005:  # IconEnvironmentDataBlock
-                block_info['data'] = self.parse_environment_block(data, current_offset, block_size)
-                icon_env_block_data = block_info['data']
 
             # Check suspicious patterns
             if signature not in self.KNOWN_BLOCKS:
                 self.suspicious.append(f"Unknown Extra Data Block signature: {hex(signature)}")
-                self.risk_score += 3
+                self.risk_score += 2
             elif (self.KNOWN_BLOCKS[signature][1] and 
-                  block_size != self.KNOWN_BLOCKS[signature][1]):
+                block_size != self.KNOWN_BLOCKS[signature][1]):
                 self.suspicious.append(
                     f"Invalid block size for {block_info['name']}: "
                     f"Expected {self.KNOWN_BLOCKS[signature][1]}, Got {block_size}")
-                self.risk_score += 0.1
+                self.risk_score += 0.2
 
             blocks.append(block_info)
             current_offset += block_size
-            block_count += 1
-
-        # Compare Icon
-        if env_block_data and icon_env_block_data:
-            env_target = env_block_data.get('TargetUnicode', '').lower()
-            icon_target = icon_env_block_data.get('TargetUnicode', '').lower()
-            if env_target and icon_target and env_target != icon_target:
-                self.suspicious.append(
-                    f"Icon mismatch detected:\n"
-                    f"Environment Target: {env_target}\n"
-                    f"Icon Target: {icon_target}"
-                )
-                self.risk_score += 0.5
-
-        # Compare Shell Link and IconLocation
-        if icon_env_block_data and hasattr(self, 'structure_info'):
-            shell_icon = self.structure_info.get('IconLocation', '').lower()
-            icon_block = icon_env_block_data.get('TargetUnicode', '').lower()
-            if shell_icon and icon_block and shell_icon != icon_block:
-                self.suspicious.append(
-                    f"Shell Link and IconEnvironmentDataBlock icon mismatch:\n"
-                    f"Shell Link Icon: {shell_icon}\n"
-                    f"Icon Block: {icon_block}"
-                )
-                self.risk_score += 0.5
-
-        if block_count > 11:
-            self.suspicious.append(
-                f"Suspicious number of Extra Data Blocks: {block_count}")
-            self.risk_score += 3
 
         return blocks
 
-    def parse_environment_block(self, data, offset, block_size):
-        try:
-        # Start after block header(8bytes)
-            current_offset = offset + 8
-            target_ansi = data[current_offset:current_offset+260].split(b'\x00')[0].decode('ascii', errors='ignore')
-            current_offset += 260
-            target_unicode = data[current_offset:current_offset+520].split(b'\x00\x00')[0].decode('utf-16le', errors='ignore')
-        
-            return {
-                'TargetAnsi': target_ansi,
-                'TargetUnicode': target_unicode
-            }
-        except Exception as e:
-            return {
-                'error': f"Failed to parse EnvironmentVariableDataBlock: {str(e)}"
-            }
 
     def check_virustotal(self, file_hash):
         if not self.vt_api_key:
@@ -261,58 +380,88 @@ class LNKAnalyzer:
             header = self.read_lnk_header(data)
             flags = self.analyze_flags(header['LinkFlags'])
 
-            # Store structure information
-            self.structure_info = {
-                'Header': header,
-                'Flags': flags,
-                'TargetPath': shell_link.TargetPath,
-                'Arguments': shell_link.Arguments,
-                'WorkingDirectory': shell_link.WorkingDirectory,
-                'IconLocation': shell_link.IconLocation,
-                'WindowStyle': header['ShowCommand'],
-                'FileSize': os.path.getsize(self.lnk_path),
-                'ExtraBlocks': []
-            }
-
-            # Analyze suspicious patterns
+            # 기본 위험도 검사
             if header['ShowCommand'] == 7:
                 self.suspicious.append("Suspicious ShowCommand value (7) - Minimized execution")
                 self.risk_score += 3
 
-            if shell_link.Arguments:
-                suspicious_commands = [
-                    'powershell', 'cmd.exe', 'rundll32', 'regsvr32', 'mshta',
-                    'certutil', 'bitsadmin', 'wscript', 'cscript', 'msiexec'
-                ]
-                for cmd in suspicious_commands:
-                    if cmd.lower() in shell_link.Arguments.lower():
-                        self.malicious.append(f"Malicious command found in arguments: {cmd}")
-                        self.risk_score += 4
+            # 초기 구조 정보 설정
+            self.structure_info = {
+                'Header': {
+                    'Size': header['HeaderSize'],
+                    'Data': header,
+                    'Description': 'Shell Link Header',
+                    'Flags': flags
+                },
+                'LinkTargetIDList': {
+                    'Size': 0,
+                    'Data': None,
+                    'Description': 'Contains ID list of target'
+                },
+                'LinkInfo': {
+                    'Size': 0,
+                    'Data': None,
+                    'Description': 'Contains information about linked file'
+                },
+                'StringData': {
+                    'Size': 0,
+                    'Data': None,
+                    'Description': 'Contains various string properties'
+                },
+                'ExtraData': {
+                    'Size': 0,
+                    'Data': [],
+                    'Description': 'Contains additional data blocks'
+                },
+                'ShellLinkInfo': {
+                    'TargetPath': shell_link.TargetPath,
+                    'Arguments': shell_link.Arguments,
+                    'WorkingDirectory': shell_link.WorkingDirectory,
+                    'IconLocation': shell_link.IconLocation,
+                    'WindowStyle': header['ShowCommand'],
+                    'FileSize': os.path.getsize(self.lnk_path)
+                }
+            }
 
-            # Analyze Extra Data Blocks
-            offset = 76  # Start after header
+            # 구조 분석 시작
+            offset = 76  # 헤더 이후 시작
+
+            # LinkTargetIDList 처리
             if flags['HasLinkTargetIDList'][0]:
                 idlist_size = struct.unpack('<H', data[offset:offset+2])[0]
+                self.structure_info['LinkTargetIDList']['Size'] = idlist_size + 2
+                self.structure_info['LinkTargetIDList']['Data'] = data[offset:offset+idlist_size+2].hex()
                 offset += 2 + idlist_size
 
+            # LinkInfo 처리
             if flags['HasLinkInfo'][0]:
                 linkinfo_size = struct.unpack('<I', data[offset:offset+4])[0]
+                self.structure_info['LinkInfo']['Size'] = linkinfo_size
+                self.structure_info['LinkInfo']['Data'] = data[offset:offset+linkinfo_size].hex()
                 offset += linkinfo_size
 
-            # Skip String Data
-            for flag in ['HasName', 'HasRelativePath', 'HasWorkingDir', 
-                        'HasArguments', 'HasIconLocation']:
-                if flags[flag][0]:
-                    if flags['IsUnicode'][0]:
-                        str_size = struct.unpack('<H', data[offset:offset+2])[0] * 2
-                    else:
-                        str_size = struct.unpack('<H', data[offset:offset+2])[0]
-                    offset += 2 + str_size
+            has_string_data = any([
+                flags['HasName'][0],
+                flags['HasRelativePath'][0],
+                flags['HasWorkingDir'][0],
+                flags['HasArguments'][0],
+                flags['HasIconLocation'][0]
+            ])
 
-            # Analyze Extra Data Blocks
-            self.structure_info['ExtraBlocks'] = self.analyze_extra_blocks(data, offset)
+            # String Data 분석
+            if has_string_data:
+                string_data, new_offset = self.analyze_string_data(data, offset, flags)
+                self.structure_info['StringData']['Data'] = string_data
+                self.structure_info['StringData']['Size'] = new_offset - offset
+                offset = new_offset
+            # Extra Data Blocks 분석
+            extra_blocks = self.analyze_extra_blocks(data, offset)
+            self.structure_info['ExtraData']['Data'] = extra_blocks
+            if extra_blocks:
+                total_extra_size = sum(block['size'] for block in extra_blocks)
+                self.structure_info['ExtraData']['Size'] = total_extra_size
 
-            # Generate report
+            # 보고서 생성
             generate_report(self)
 
         except Exception as e:

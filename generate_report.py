@@ -25,7 +25,28 @@ def generate_report(lnk_class):
         .extra-block { margin: 10px 0; padding: 10px; background: #f9f9f9; }
         .malicious { background: #ffebee; }
         .suspicious { background: #fff3e0; }
-        pre { background: #f5f5f5; padding: 10px; overflow-x: auto; }
+        .hex-view {
+            margin: 10px 0;
+        }
+        .hex-data {
+            font-family: monospace;
+            font-size: 14px;
+            background: #f8f9fa;
+            padding: 10px;
+            border: 1px solid #ddd;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .parsed-data {
+            background: #f8f9fa;
+            padding: 10px;
+            border: 1px solid #ddd;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
     </style>
 </head>
 <body>
@@ -39,7 +60,7 @@ def generate_report(lnk_class):
             <h2>File Information</h2>
             <table>
                 <tr><th>File Path</th><td>{{ lnk_path }}</td></tr>
-                <tr><th>File Size</th><td>{{ structure_info['FileSize'] }} bytes</td></tr>
+                <tr><th>File Size</th><td>{{ structure_info['ShellLinkInfo']['FileSize'] }} bytes</td></tr>
                 <tr><th>MD5</th><td>{{ file_hashes['md5'] }}</td></tr>
                 <tr><th>SHA1</th><td>{{ file_hashes['sha1'] }}</td></tr>
                 <tr><th>SHA256</th><td>{{ file_hashes['sha256'] }}</td></tr>
@@ -76,18 +97,20 @@ def generate_report(lnk_class):
         <div class="section">
             <h2>Link Target Information</h2>
             <table>
-                <tr><th>Target Path</th><td>{{ structure_info['TargetPath'] }}</td></tr>
-                <tr><th>Arguments</th><td>{{ structure_info['Arguments'] or 'None' }}</td></tr>
-                <tr><th>Working Directory</th><td>{{ structure_info['WorkingDirectory'] }}</td></tr>
-                <tr><th>Icon Location</th><td>{{ structure_info['IconLocation'] }}</td></tr>
-                <tr><th>Window Style</th><td>{{ structure_info['WindowStyle'] }}</td></tr>
+                <tr><th>Target Path</th><td>{{ structure_info['ShellLinkInfo']['TargetPath'] }}</td></tr>
+                <tr><th>Arguments</th><td>{{ structure_info['ShellLinkInfo']['Arguments'] or 'None' }}</td></tr>
+                <tr><th>Working Directory</th><td>{{ structure_info['ShellLinkInfo']['WorkingDirectory'] }}</td></tr>
+                <tr><th>Icon Location</th><td>{{ structure_info['ShellLinkInfo']['IconLocation'] }}</td></tr>
+                <tr><th>Window Style</th><td>{{ structure_info['ShellLinkInfo']['WindowStyle'] }}</td></tr>
             </table>
         </div>
 
         <div class="section">
             <h2>Shell Link Header</h2>
+            <div class="description">{{ structure_info['Header']['Description'] }}</div>
+            <div class="size">Size: {{ structure_info['Header']['Size'] }} bytes</div>
             <table>
-            {% for key, value in structure_info['Header'].items() %}
+            {% for key, value in structure_info['Header']['Data'].items() %}
                 <tr><th>{{ key }}</th><td>{{ value }}</td></tr>
             {% endfor %}
             </table>
@@ -97,7 +120,7 @@ def generate_report(lnk_class):
             <h2>Link Flags</h2>
             <table>
                 <tr><th>Flag Name</th><th>Status</th><th>Description</th></tr>
-                {% for name, (value, desc) in structure_info['Flags'].items() %}
+                {% for name, (value, desc) in structure_info['Header']['Flags'].items() %}
                 <tr>
                     <td>{{ name }}</td>
                     <td>{{ "Enabled" if value else "Disabled" }}</td>
@@ -108,27 +131,91 @@ def generate_report(lnk_class):
         </div>
 
         <div class="section">
-            <h2>Extra Data Blocks</h2>
-            {% for block in structure_info['ExtraBlocks'] %}
+            <h2>String Data</h2>
+            <div class="description">{{ structure_info['StringData']['Description'] }}</div>
+            <div class="size">Size: {{ structure_info['StringData']['Size'] }} bytes</div>
+            {% if structure_info['StringData']['Data'] %}
+            {% for string_type, data in structure_info['StringData']['Data'].items() %}
             <div class="extra-block">
-                <h3>{{ block['name'] }}</h3>
+                <h3>{{ string_type }}</h3>
                 <table>
-                    <tr><th>Offset</th><td>{{ block['offset'] }}</td></tr>
-                    <tr><th>Size</th><td>{{ block['size'] }}</td></tr>
-                    <tr><th>Signature</th><td>{{ block['signature'] }}</td></tr>
-                    {% if block['expected_size'] %}
-                    <tr><th>Expected Size</th><td>{{ block['expected_size'] }}</td></tr>
-                    {% endif %}
-                    {% if block['data'] %}
-                    <tr><th>Block Data</th>
+                    <tr>
+                        <th>Offset</th>
+                        <td>{{ data.offset }}</td>
+                    </tr>
+                    <tr>
+                        <th>Size Information</th>
+                        <td>{{ data.size_hex }}</td>
+                    </tr>
+                    <tr>
+                        <th>String Value</th>
+                        <td>{{ data.value }}</td>
+                    </tr>
+                    <tr>
+                        <th>Raw Hex</th>
                         <td>
-                            <pre>{{ block['data'] | pprint }}</pre>
+                            <div class="hex-view">
+                                <div class="hex-data">{{ data.raw_hex }}</div>
+                            </div>
                         </td>
                     </tr>
-                    {% endif %}
                 </table>
             </div>
             {% endfor %}
+            {% else %}
+            <p>No String Data found</p>
+            {% endif %}
+        </div>
+
+        <div class="section">
+            <h2>Extra Data Blocks</h2>
+            <div class="description">{{ structure_info['ExtraData']['Description'] }}</div>
+            <div class="size">Size: {{ structure_info['ExtraData']['Size'] }} bytes</div>
+            {% if structure_info['ExtraData']['Data'] %}
+            {% for block in structure_info['ExtraData']['Data'] %}
+            <div class="extra-block">
+                <h3>{{ block['name'] }}</h3>
+                <table>
+                    <tr>
+                        <th>Offset</th>
+                        <td>{{ block['offset'] }}</td>
+                    </tr>
+                    <tr>
+                        <th>Size Information</th>
+                        <td>{{ block['size_hex'] }}</td>
+                    </tr>
+                    <tr>
+                        <th>Signature</th>
+                        <td>{{ block['signature'] }} ({{ block['signature_hex'] }})</td>
+                    </tr>
+                    {% if block['expected_size'] %}
+                    <tr>
+                        <th>Expected Size</th>
+                        <td>{{ block['expected_size'] }}</td>
+                    </tr>
+                    {% endif %}
+                    {% if block['parsed_data'] %}
+                    <tr>
+                        <th>Parsed Data</th>
+                        <td>
+                            <pre class="parsed-data">{{ block['parsed_data'] | pprint }}</pre>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    <tr>
+                        <th>Raw Hex</th>
+                        <td>
+                            <div class="hex-view">
+                                <div class="hex-data">{{ block['data_hex'] }}</div>
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            {% endfor %}
+            {% else %}
+            <p>No Extra Data Blocks found</p>
+            {% endif %}
         </div>
 
         {% if vt_results and vt_results.get('found') %}

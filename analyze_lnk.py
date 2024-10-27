@@ -111,12 +111,12 @@ class LNKAnalyzer:
                 'data': self.parse_environment_block(data, current_offset, block_size)
             }
             
-            # EnvironmentVariableDataBlock 분석
+            # Analyze EnvironmentVariableDataBlock
             if signature == 0xA0000004:  # EnvironmentVariableDataBlock
                 block_info['data'] = self.parse_environment_block(data, current_offset, block_size)
                 env_block_data = block_info['data']
             
-            # IconEnvironmentDataBlock 분석
+            # Analyze IconEnvironmentDataBlock
             elif signature == 0xA0000005:  # IconEnvironmentDataBlock
                 block_info['data'] = self.parse_environment_block(data, current_offset, block_size)
                 icon_env_block_data = block_info['data']
@@ -136,7 +136,7 @@ class LNKAnalyzer:
             current_offset += block_size
             block_count += 1
 
-        # 아이콘 불일치 검사
+        # Compare Icon
         if env_block_data and icon_env_block_data:
             env_target = env_block_data.get('TargetUnicode', '').lower()
             icon_target = icon_env_block_data.get('TargetUnicode', '').lower()
@@ -148,7 +148,7 @@ class LNKAnalyzer:
                 )
                 self.risk_score += 0.5
 
-        # Shell Link의 IconLocation과 비교
+        # Compare Shell Link and IconLocation
         if icon_env_block_data and hasattr(self, 'structure_info'):
             shell_icon = self.structure_info.get('IconLocation', '').lower()
             icon_block = icon_env_block_data.get('TargetUnicode', '').lower()
@@ -169,7 +169,7 @@ class LNKAnalyzer:
 
     def parse_environment_block(self, data, offset, block_size):
         try:
-        # 블록 헤더(8바이트) 이후부터 시작
+        # Start after block header(8bytes)
             current_offset = offset + 8
             target_ansi = data[current_offset:current_offset+260].split(b'\x00')[0].decode('ascii', errors='ignore')
             current_offset += 260

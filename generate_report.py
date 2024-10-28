@@ -36,16 +36,21 @@ def generate_report(lnk_class):
             border: 1px solid #ddd;
             white-space: pre-wrap;
             word-break: break-all;
+            max-width: 1000px;
             max-height: 200px;
-            overflow-y: auto;
+            overflow-x: auto;
+            overflow-y: scroll;
         }
         .parsed-data {
             background: #f8f9fa;
             padding: 10px;
             border: 1px solid #ddd;
             white-space: pre-wrap;
+            word-break: break-all;
+            max-width: 1000px;
             max-height: 200px;
-            overflow-y: auto;
+            overflow-x: auto;
+            overflow-y: scroll;
         }
     </style>
 </head>
@@ -53,7 +58,7 @@ def generate_report(lnk_class):
     <div class="container">
         <div class="header">
             <h1>LNK File Analysis Report</h1>
-            <p>Analysis Date: {{ datetime.now().strftime('%Y-%m-%d %H:%M:%S') }}</p>
+            <p>Analysis Date: {{ datetime.now().strftime('%Y-%m-%d %H:%M:%S') }}, Made by TeamJowonReady</p>
         </div>
 
         <div class="section">
@@ -95,17 +100,6 @@ def generate_report(lnk_class):
         </div>
 
         <div class="section">
-            <h2>Link Target Information</h2>
-            <table>
-                <tr><th>Target Path</th><td>{{ structure_info['ShellLinkInfo']['TargetPath'] }}</td></tr>
-                <tr><th>Arguments</th><td>{{ structure_info['ShellLinkInfo']['Arguments'] or 'None' }}</td></tr>
-                <tr><th>Working Directory</th><td>{{ structure_info['ShellLinkInfo']['WorkingDirectory'] }}</td></tr>
-                <tr><th>Icon Location</th><td>{{ structure_info['ShellLinkInfo']['IconLocation'] }}</td></tr>
-                <tr><th>Window Style</th><td>{{ structure_info['ShellLinkInfo']['WindowStyle'] }}</td></tr>
-            </table>
-        </div>
-
-        <div class="section">
             <h2>Shell Link Header</h2>
             <div class="description">{{ structure_info['Header']['Description'] }}</div>
             <div class="size">Size: {{ structure_info['Header']['Size'] }} bytes</div>
@@ -130,6 +124,16 @@ def generate_report(lnk_class):
             </table>
         </div>
 
+        
+        <div class="section">
+            <h2>Link Target Information</h2>
+            <table style="width:100%">
+                <tr><th style="width:25%">Target Path</th><td>{{ structure_info['ShellLinkInfo']['TargetPath'] }}</td></tr>
+                <tr><th style="width:25%">Icon Location</th><td>{{ structure_info['ShellLinkInfo']['IconLocation'] }}</td></tr>
+            </table>
+        </div>
+
+
         <div class="section">
             <h2>String Data</h2>
             <div class="description">{{ structure_info['StringData']['Description'] }}</div>
@@ -149,7 +153,11 @@ def generate_report(lnk_class):
                     </tr>
                     <tr>
                         <th>String Value</th>
-                        <td>{{ data.value }}</td>
+                        <td>
+                            <div class="hex-view">
+                                <div class="parsed-data">{{data.value}}</div>
+                            </div>
+                        </td>
                     </tr>
                     <tr>
                         <th>Raw Hex</th>

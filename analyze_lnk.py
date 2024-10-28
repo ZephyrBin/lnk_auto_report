@@ -24,17 +24,17 @@ class LNKAnalyzer:
         
         # Known Extra Data Block signatures
         self.KNOWN_BLOCKS = {
-            0xA0000001: ('ConsoleDataBlock', 0x0C),
-            0xA0000002: ('ConsoleFEDataBlock', 0x0C),
-            0xA0000003: ('DarwinDataBlock', 0x314),
-            0xA0000004: ('EnvironmentVariableDataBlock', 0x314),
-            0xA0000005: ('IconEnvironmentDataBlock', 0x314),
-            0xA0000006: ('KnownFolderDataBlock', 0x1C),
-            0xA0000007: ('PropertyStoreDataBlock', None),
+            0xA0000002: ('ConsoleDataBlock', 0x0C),
+            0xA0000004: ('ConsoleFEDataBlock', 0x0C),
+            0xA0000006: ('DarwinDataBlock', 0x314),
+            0xA0000001: ('EnvironmentVariableDataBlock', 0x314),
+            0xA0000007: ('IconEnvironmentDataBlock', 0x314),
+            0xA000000B: ('KnownFolderDataBlock', 0x1C),
+            0xA0000009: ('PropertyStoreDataBlock', None),
             0xA0000008: ('ShimDataBlock', None),
-            0xA0000009: ('SpecialFolderDataBlock', 0x10),
-            0xA000000A: ('TrackerDataBlock', 0x58),
-            0xA000000B: ('VistaAndAboveIDListDataBlock', None),
+            0xA0000005: ('SpecialFolderDataBlock', 0x10),
+            0xA0000003: ('TrackerDataBlock', 0x58),
+            0xA000000C: ('VistaAndAboveIDListDataBlock', None),
         }
 
     def read_lnk_header(self, data):
@@ -151,6 +151,7 @@ class LNKAnalyzer:
 
         suspicious_patterns = [
             (r'powershell.*-enc.*', 'Encoded PowerShell command'),
+            (r'powershell.*', 'PowerShell command'),
             (r'cmd.*/c.*', 'Command prompt execution'),
             (r'rundll32.*,', 'RunDLL32 usage'),
             (r'%.*%.*%', 'Multiple environment variables'),
@@ -166,7 +167,7 @@ class LNKAnalyzer:
 
     def parse_extra_block_data(self, signature, data):
         try:
-            if signature == 0xA0000001:  # ConsoleDataBlock
+            if signature == 0xA0000002:  # ConsoleDataBlock
                 return {
                     'type': 'ConsoleDataBlock',
                     'fill_attributes': struct.unpack('<H', data[0:2])[0],
@@ -177,20 +178,20 @@ class LNKAnalyzer:
                     'window_size_y': struct.unpack('<H', data[10:12])[0]
                 }
             
-            elif signature == 0xA0000002:  # ConsoleFEDataBlock
+            elif signature == 0xA0000004:  # ConsoleFEDataBlock
                 return {
                     'type': 'ConsoleFEDataBlock',
                     'code_page': struct.unpack('<I', data[0:4])[0]
                 }
                 
-            elif signature == 0xA0000003:  # DarwinDataBlock
+            elif signature == 0xA0000006:  # DarwinDataBlock
                 app_name = data[0:260].split(b'\x00')[0].decode('ascii', errors='ignore')
                 return {
                     'type': 'DarwinDataBlock',
                     'darwin_data_ansi': app_name
                 }
                 
-            elif signature == 0xA0000004:  # EnvironmentVariableDataBlock
+            elif signature == 0xA0000001:  # EnvironmentVariableDataBlock
                 target_ansi = data[0:260].split(b'\x00')[0].decode('ascii', errors='ignore')
                 target_unicode = data[260:520].split(b'\x00\x00')[0].decode('utf-16le', errors='ignore')
                 return {
@@ -199,7 +200,7 @@ class LNKAnalyzer:
                     'target_unicode': target_unicode
                 }
                 
-            elif signature == 0xA0000005:  # IconEnvironmentDataBlock
+            elif signature == 0xA0000007:  # IconEnvironmentDataBlock
                 target_ansi = data[0:260].split(b'\x00')[0].decode('ascii', errors='ignore')
                 target_unicode = data[260:520].split(b'\x00\x00')[0].decode('utf-16le', errors='ignore')
                 return {
@@ -208,7 +209,7 @@ class LNKAnalyzer:
                     'target_unicode': target_unicode
                 }
                 
-            elif signature == 0xA0000006:  # KnownFolderDataBlock
+            elif signature == 0xA000000B:  # KnownFolderDataBlock
                 return {
                     'type': 'KnownFolderDataBlock',
                     'known_folder_id': data[0:16].hex(),
@@ -221,14 +222,14 @@ class LNKAnalyzer:
                     'layer_name': data.split(b'\x00\x00')[0].decode('utf-16le', errors='ignore')
                 }
                 
-            elif signature == 0xA0000009:  # SpecialFolderDataBlock
+            elif signature == 0xA0000005:  # SpecialFolderDataBlock
                 return {
                     'type': 'SpecialFolderDataBlock',
                     'special_folder_id': struct.unpack('<I', data[0:4])[0],
                     'offset': struct.unpack('<I', data[4:8])[0]
                 }
                 
-            elif signature == 0xA000000A:  # TrackerDataBlock
+            elif signature == 0xA0000003:  # TrackerDataBlock
                 return {
                     'type': 'TrackerDataBlock',
                     'length': struct.unpack('<I', data[0:4])[0],
@@ -240,9 +241,15 @@ class LNKAnalyzer:
                     'birth_droid_file_id': data[64:80].hex(),
                 }
                 
-            elif signature == 0xA000000B:  # VistaAndAboveIDListDataBlock
+            elif signature == 0xA000000C:  # VistaAndAboveIDListDataBlock
                 return {
                     'type': 'VistaAndAboveIDListDataBlock',
+                    'data': data.hex()
+                }
+            
+            elif signature == 0xA0000009:
+                return {
+                    'type': 'PropertyStoreDataBlock',
                     'data': data.hex()
                 }
                 
@@ -282,14 +289,14 @@ class LNKAnalyzer:
                 'signature_hex': signature_bytes.hex(),
                 'name': self.KNOWN_BLOCKS.get(signature, ('Unknown', None))[0],
                 'expected_size': self.KNOWN_BLOCKS.get(signature, ('Unknown', None))[1],
-                'data_hex': data[current_offset+8:current_offset+block_size].hex(),
+                'data_hex': (data[current_offset+8:current_offset+block_size].hex())[0:1000],
                 'parsed_data': self.parse_extra_block_data(signature, data[current_offset+8:current_offset+block_size])
             }
 
             # Check suspicious patterns
             if signature not in self.KNOWN_BLOCKS:
                 self.suspicious.append(f"Unknown Extra Data Block signature: {hex(signature)}")
-                self.risk_score += 2
+                self.risk_score += 4
             elif (self.KNOWN_BLOCKS[signature][1] and 
                 block_size != self.KNOWN_BLOCKS[signature][1]):
                 self.suspicious.append(
@@ -383,7 +390,7 @@ class LNKAnalyzer:
             # 기본 위험도 검사
             if header['ShowCommand'] == 7:
                 self.suspicious.append("Suspicious ShowCommand value (7) - Minimized execution")
-                self.risk_score += 3
+                self.risk_score += 4
 
             # 초기 구조 정보 설정
             self.structure_info = {
@@ -395,11 +402,13 @@ class LNKAnalyzer:
                 },
                 'LinkTargetIDList': {
                     'Size': 0,
+                    'Hex': None,
                     'Data': None,
                     'Description': 'Contains ID list of target'
                 },
                 'LinkInfo': {
                     'Size': 0,
+                    'Hex': None,
                     'Data': None,
                     'Description': 'Contains information about linked file'
                 },
@@ -419,7 +428,7 @@ class LNKAnalyzer:
                     'WorkingDirectory': shell_link.WorkingDirectory,
                     'IconLocation': shell_link.IconLocation,
                     'WindowStyle': header['ShowCommand'],
-                    'FileSize': os.path.getsize(self.lnk_path)
+                    'FileSize': os.path.getsize(self.lnk_path),
                 }
             }
 
@@ -460,6 +469,9 @@ class LNKAnalyzer:
             if extra_blocks:
                 total_extra_size = sum(block['size'] for block in extra_blocks)
                 self.structure_info['ExtraData']['Size'] = total_extra_size
+
+            if (self.risk_score > 10):
+                self.risk_score = 10
 
             # 보고서 생성
             generate_report(self)

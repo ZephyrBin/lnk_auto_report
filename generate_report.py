@@ -23,8 +23,35 @@ def generate_report(lnk_class):
         th { background: #f5f5f5; }
         .risk-gauge { text-align: center; margin: 20px 0; }
         .extra-block { margin: 10px 0; padding: 10px; background: #f9f9f9; }
-        .malicious { background: #ffebee; }
-        .suspicious { background: #fff3e0; }
+        .risk-level {
+            text-align: center;
+            font-size: 1.2em;
+            font-weight: bold;
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .low-risk {
+            color: #27ae60;
+            background-color: #eafaf1;
+        }
+        .suspicious {
+            color: #f39c12;
+            background-color: #fef9e7;
+        }
+        .malicious {
+            color: #c0392b;
+            background-color: #fdedec;
+        .item-block {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f8f9fa;
+            border-left: 3px solid #3498db;
+        }
+        }
+        .raw-data {
+            margin: 15px 0;
+        }
         .hex-view {
             margin: 10px 0;
         }
@@ -52,6 +79,8 @@ def generate_report(lnk_class):
             overflow-x: auto;
             overflow-y: scroll;
         }
+
+
     </style>
 </head>
 <body>
@@ -77,6 +106,17 @@ def generate_report(lnk_class):
             <div class="risk-gauge">
                 <img src="data:image/png;base64,{{ risk_gauge }}" alt="Risk Gauge">
             </div>
+            <div class="risk-level {% if risk_score <= 3 %}low-risk{% elif risk_score <= 7 %}suspicious{% else %}malicious{% endif %}">
+                Risk Level: 
+                {% if risk_score <= 3 %}
+                    <span class="low-risk">Low Risk ({{ risk_score }}/10)</span>
+                {% elif risk_score <= 7 %}
+                    <span class="suspicious">Suspicious ({{ risk_score }}/10)</span>
+                {% else %}
+                    <span class="malicious">Malicious ({{ risk_score }}/10)</span>
+                {% endif %}
+            </div>
+
             {% if malicious %}
             <div class="malicious">
                 <h3>Malicious Indicators</h3>
@@ -124,15 +164,55 @@ def generate_report(lnk_class):
             </table>
         </div>
 
-        
         <div class="section">
-            <h2>Link Target Information</h2>
-            <table style="width:100%">
-                <tr><th style="width:25%">Target Path</th><td>{{ structure_info['ShellLinkInfo']['TargetPath'] }}</td></tr>
-                <tr><th style="width:25%">Icon Location</th><td>{{ structure_info['ShellLinkInfo']['IconLocation'] }}</td></tr>
-            </table>
+            <h2>Link Target ID List</h2>
+            <div class="description">{{ structure_info['LinkTargetIDList']['Description'] }}</div>
+            <div class="size">Size: {{ structure_info['LinkTargetIDList']['Size'] }} bytes</div>
+            {% if structure_info['LinkTargetIDList']['ParsedData'] %}
+            <div class="extra-block">
+                <h3>Parsed ItemID List</h3>
+                {% for item in structure_info['LinkTargetIDList']['ParsedData']['ItemIDList'] %}
+                <div class="item-block">
+                    <table>
+                        <tr><th>Size</th><td>{{ item['Size'] }}</td></tr>
+                        <tr><th>Type</th><td>{{ item['Parsed'] }}</td></tr>
+                        <tr>
+                            <th>Raw Data</th>
+                            <td><pre class="hex-data">{{ item['Data'] }}</pre></td>
+                        </tr>
+                    </table>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            <div class="raw-data">
+                <h3>Raw Data</h3>
+                <pre class="hex-data">{{ structure_info['LinkTargetIDList']['Data'] }}</pre>
+            </div>
         </div>
 
+        <div class="section">
+            <h2>Link Info</h2>
+            <div class="description">{{ structure_info['LinkInfo']['Description'] }}</div>
+            <div class="size">Size: {{ structure_info['LinkInfo']['Size'] }} bytes</div>
+            {% if structure_info['LinkInfo']['ParsedData'] %}
+            <div class="extra-block">
+                <h3>Parsed Link Info</h3>
+                <table>
+                    {% for key, value in structure_info['LinkInfo']['ParsedData'].items() %}
+                    <tr>
+                        <th>{{ key }}</th>
+                        <td>{{ value }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+            {% endif %}
+            <div class="raw-data">
+                <h3>Raw Data</h3>
+                <pre class="hex-data">{{ structure_info['LinkInfo']['Data'] }}</pre>
+            </div>
+        </div>
 
         <div class="section">
             <h2>String Data</h2>
@@ -250,10 +330,10 @@ def generate_report(lnk_class):
         malicious=lnk_class.malicious,
         suspicious=lnk_class.suspicious,
         risk_gauge=lnk_class.generate_risk_gauge(),
+        risk_score=lnk_class.risk_score,
         vt_results=lnk_class.vt_results
     )
 
-    # Save report
     report_path = f"{os.path.splitext(lnk_class.lnk_path)[0]}_analysis_report.html"
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write(report_html)
